@@ -1,25 +1,28 @@
 # security-hardening
 
-A Claude Code skill that applies a full security baseline to your application before shipping to production.
+A Claude Code skill that runs an AI-assisted, threat-model-driven security review of your web app and applies a full hardening baseline before shipping to production. Works across stacks — TypeScript/JavaScript, Python, Go, Ruby, PHP, Java, and more.
 
-Covers secrets management, input validation, authorization, dependency hygiene, observability, and verification — with centralized reusable helpers and a final summary report.
+It scans broadly against an OWASP-aligned taxonomy, **triages findings by severity and true-positive likelihood**, then fixes the real issues (highest severity first) with centralized reusable helpers — and produces a final summary report with an auditable findings table.
 
 ---
 
 ## What it does
 
-When triggered, the skill walks through 6 sections in order:
+When triggered, the skill walks through 7 sections in order:
 
-| Section | What it checks |
+| Section | What it does |
 |---------|---------------|
-| **1. Secrets** | Hardcoded API keys, tokens, passwords; client-exposed env vars; secrets in logs |
-| **2. Input handling** | Validation at every trust boundary; SQL injection; XSS; open redirects; shell injection |
-| **3. Authorization** | Every route/action checks auth + ownership server-side; no frontend-only guards |
-| **4. Dependency hygiene** | `npm audit`; unmaintained packages; HTTP/DB client configuration |
-| **5. Observability** | Structured logging for auth/validation/webhook failures; no secrets in logs |
-| **6. Verification** | Lint, typecheck, tests, build, security scan; final written summary |
+| **1. Threat model & AI-assisted scanning** | Maps entry points, assets, and attacker goals; scans the OWASP-aligned taxonomy (optionally fanning out parallel read-only subagents); triages every candidate by severity and confirms true positives before acting |
+| **2. Secrets** | Hardcoded API keys, tokens, passwords; client-bundled env vars (`NEXT_PUBLIC_*`, `VITE_*`, …); secrets in logs; startup env validation |
+| **3. Input handling** | Validation at every trust boundary; SQL/NoSQL/command injection; XSS; SSRF; open redirects |
+| **4. Authorization** | Every route/action checks auth + ownership server-side; IDOR / cross-tenant prevention; no frontend-only guards |
+| **5. Dependency hygiene** | `npm`/`pip`/`go`/`bundler`/`composer`/`cargo` audits + `osv-scanner`; unmaintained packages; HTTP/DB client config |
+| **6. Observability** | Structured logging for auth/authz/validation/webhook failures; no secrets in logs |
+| **7. Verification** | Lint, typecheck, tests, build, security scan; final written summary with findings table |
 
-At the end, Claude produces a **Security Hardening Summary** listing every change made, every risk fixed, and any manual follow-up required (e.g. rotating a leaked key).
+The core philosophy mirrors lessons from large-scale AI vulnerability discovery: **finding candidate issues is cheap; the bottleneck is triage, prioritization, and fixing.** So the skill confirms true positives, ranks by severity, and fixes the issues that matter first.
+
+At the end, Claude produces a **Security Hardening Summary** with a triaged findings table, every change made, every risk fixed, and any manual follow-up required (e.g. rotating a leaked key).
 
 ---
 
@@ -93,12 +96,13 @@ Once installed, trigger the skill by saying any of these naturally in conversati
 Apply a full security baseline to this repo.
 Do a security review before we ship.
 Harden this codebase.
-Check for security vulnerabilities.
+Scan this project for vulnerabilities.
+Threat model this app and fix what matters.
 Make this production-ready.
 Run a security audit.
 ```
 
-Claude will automatically invoke the skill and work through all 6 sections.
+Claude will automatically invoke the skill and work through all 7 sections.
 
 You can also invoke it explicitly:
 
@@ -112,27 +116,36 @@ You can also invoke it explicitly:
 
 Claude will:
 
-1. **Audit** your codebase across all 6 sections
-2. **Fix** each issue using centralized helpers (no copy-pasted guards)
-3. **Explain** every change it makes and why
-4. **Flag** anything requiring manual action (e.g. rotate a leaked key, set an env var on your hosting platform)
-5. **Run** lint, typecheck, tests, and build to verify nothing is broken
-6. **Deliver** a written Security Hardening Summary
+1. **Threat model** your app — map entry points, assets, and attacker goals to prioritize the scan
+2. **Scan** the codebase across the OWASP-aligned taxonomy (fanning out parallel subagents for large repos)
+3. **Triage** every candidate — confirm true positives, assign severity, deduplicate; discard noise
+4. **Fix** real issues highest-severity-first, using centralized helpers (no copy-pasted guards)
+5. **Explain** every change and **flag** anything requiring manual action (e.g. rotate a leaked key)
+6. **Run** lint, typecheck, tests, and build to verify nothing is broken
+7. **Deliver** a written Security Hardening Summary with a triaged findings table
 
 ### Example summary output
 
 ```
 ## Security Hardening Summary
 
+### Findings (triaged)
+| Severity | Location           | Issue                        | Status         |
+|----------|--------------------|------------------------------|----------------|
+| Critical | api/auth.ts:42     | Auth bypass via empty token  | Fixed          |
+| High     | api/users.ts:88    | IDOR — no ownership check     | Fixed          |
+| Medium   | web/profile.tsx:30 | Reflected XSS in name field   | Fixed          |
+| Low      | next.config.js     | Missing security headers      | Follow-up      |
+| —        | api/legacy.ts:12   | Suspected SQLi                | False positive |
+
 ### Changes Made
-- lib/env.server.ts: Created server-only env validation with Zod
+- lib/env.server.ts: Created server-only env validation
 - app/api/users/route.ts: Added requireAuth() + input schema validation
-- convex/userLLMKeys.ts: Replaced Caesar cipher with AES-256-GCM
 - lib/logger.ts: Added structured logger with secret redaction
 
 ### Risks Fixed
 - Secrets: Moved 3 hardcoded API keys to server-only env vars
-- Input handling: Added Zod validation to 5 API routes
+- Input handling: Added schema validation to 5 API routes
 - Authorization: Added requireAuth() to 4 unguarded routes
 - Observability: Replaced console.log(token) with redacted logger
 
