@@ -8,7 +8,7 @@ It scans broadly against an OWASP-aligned taxonomy, **triages findings by severi
 
 ## What it does
 
-When triggered, the skill walks through 7 sections in order:
+When triggered, the skill walks through 9 sections in order:
 
 | Section | What it does |
 |---------|---------------|
@@ -16,9 +16,11 @@ When triggered, the skill walks through 7 sections in order:
 | **2. Secrets** | Hardcoded API keys, tokens, passwords; client-bundled env vars (`NEXT_PUBLIC_*`, `VITE_*`, …); secrets in logs; startup env validation |
 | **3. Input handling** | Validation at every trust boundary; SQL/NoSQL/command injection; XSS; SSRF; open redirects |
 | **4. Authorization** | Every route/action checks auth + ownership server-side; IDOR / cross-tenant prevention; no frontend-only guards |
-| **5. Dependency hygiene** | `npm`/`pip`/`go`/`bundler`/`composer`/`cargo` audits + `osv-scanner`; unmaintained packages; HTTP/DB client config |
-| **6. Observability** | Structured logging for auth/authz/validation/webhook failures; no secrets in logs |
-| **7. Verification** | Lint, typecheck, tests, build, security scan; final written summary with findings table |
+| **5. Data exposure & output minimization** | Allowlist serializers so responses never leak password hashes, internal fields, or other users' data; no PII in URLs; generic error responses |
+| **6. HTTP security headers & config** | CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`; locked-down CORS, secure cookies, CSRF protection |
+| **7. Dependency hygiene** | `npm`/`pip`/`go`/`bundler`/`composer`/`cargo` audits + `osv-scanner`; unmaintained packages; HTTP/DB client config |
+| **8. Observability** | Structured logging for auth/authz/validation/webhook failures; no secrets in logs |
+| **9. Verification** | Lint, typecheck, tests, build, security scan; final written summary with findings table |
 
 The core philosophy mirrors lessons from large-scale AI vulnerability discovery: **finding candidate issues is cheap; the bottleneck is triage, prioritization, and fixing.** So the skill confirms true positives, ranks by severity, and fixes the issues that matter first.
 
@@ -102,7 +104,7 @@ Make this production-ready.
 Run a security audit.
 ```
 
-Claude will automatically invoke the skill and work through all 7 sections.
+Claude will automatically invoke the skill and work through all 9 sections.
 
 You can also invoke it explicitly:
 

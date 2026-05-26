@@ -1,6 +1,6 @@
 ---
 name: security-hardening
-description: Comprehensive, AI-assisted security hardening for production web applications in any language (TypeScript/JavaScript, Python, Go, Ruby, PHP, Java, etc.). Use this skill when the user asks to "secure", "harden", "audit security", "scan for vulnerabilities", "threat model", "ship-safe", "security review", "check for vulnerabilities", "make production-ready", "apply security baseline", or before any deployment. It runs a threat-model-first scan (optionally fanning out parallel subagents), triages findings by severity and true-positive likelihood, then fixes secrets, input validation, authorization, dependencies, and observability using centralized reusable helpers, and verifies the result. ALWAYS use this skill for any security-related review or hardening task, even if the user mentions only one of these areas.
+description: Comprehensive, AI-assisted security hardening for production web applications in any language (TypeScript/JavaScript, Python, Go, Ruby, PHP, Java, etc.). Use this skill when the user asks to "secure", "harden", "audit security", "scan for vulnerabilities", "threat model", "ship-safe", "security review", "check for vulnerabilities", "make production-ready", "apply security baseline", or before any deployment. It runs a threat-model-first scan (optionally fanning out parallel subagents), triages findings by severity and true-positive likelihood, then fixes secrets, input validation, authorization, sensitive-data exposure, HTTP security headers, dependencies, and observability using centralized reusable helpers, and verifies the result. ALWAYS use this skill for any security-related review or hardening task, even if the user mentions only one of these areas.
 ---
 
 # Security Hardening
@@ -14,8 +14,8 @@ The hard-won lesson from large-scale AI vulnerability discovery is that **findin
 1. **Threat model first** (Section 1) — map entry points, trust boundaries, assets, and likely attacker goals. This drives what you scan first and how you score severity.
 2. **Scan systematically** (Section 1) — walk the vulnerability taxonomy. For anything larger than a small repo, fan out parallel read-only subagents per component or category.
 3. **Triage every candidate** (Section 1) — confirm it's a true positive, assign a severity, and deduplicate by root cause. Do not report noise.
-4. **Fix true positives, highest severity first** (Sections 2–6) — always via a centralized helper; never duplicate the same guard.
-5. **Verify and summarize** (Section 7) — run the project's checks and produce the **Security Hardening Summary** with a findings table.
+4. **Fix true positives, highest severity first** (Sections 2–8) — always via a centralized helper; never duplicate the same guard.
+5. **Verify and summarize** (Section 9) — run the project's checks and produce the **Security Hardening Summary** with a findings table.
 
 **Language note:** examples below appear in several languages. Use whichever matches the project's stack — the principles are identical across TypeScript/JavaScript, Python, Go, Ruby, PHP, Java, and others. When the stack isn't shown, apply the same pattern with the idiomatic library for that ecosystem.
 
@@ -45,11 +45,12 @@ Walk the codebase against each category and find **concrete instances** (with `f
 - **Cryptographic failures & secret exposure** — hardcoded secrets, weak/rolled-your-own crypto, secrets in logs (→ Section 2)
 - **SSRF, open redirect, unsafe deserialization**
 - **XSS** — stored, reflected, DOM-based; unsafe HTML/markdown rendering (→ Section 3)
-- **CSRF** and state-changing `GET` requests
+- **Sensitive data exposure** — over-broad responses, internal fields/PII in output, verbose errors (→ Section 5)
+- **Security misconfiguration** — missing security headers, permissive CORS, insecure cookies, exposed debug/admin endpoints (→ Section 6)
+- **CSRF** and state-changing `GET` requests (→ Section 6)
 - **Authentication & session weaknesses** — weak password hashing, missing rate-limit/lockout, insecure cookies/tokens
-- **Security misconfiguration** — missing security headers, permissive CORS, verbose error responses, exposed debug/admin endpoints
-- **Vulnerable & outdated dependencies** (→ Section 5)
-- **Insufficient logging & monitoring** (→ Section 6)
+- **Vulnerable & outdated dependencies** (→ Section 7)
+- **Insufficient logging & monitoring** (→ Section 8)
 
 ### 1c. Fan out for large codebases
 
@@ -72,7 +73,7 @@ Acting on noise is the expensive failure mode. For each candidate finding:
    - **Medium** — reflected XSS requiring interaction, CSRF on meaningful actions, SSRF to limited targets.
    - **Low** — info disclosure with minimal impact, missing defense-in-depth headers.
 3. **Deduplicate by root cause.** Collapse the same flaw across many call sites into a single centralized fix.
-4. **Record it** in the findings table (Section 7) with severity, location, and status.
+4. **Record it** in the findings table (Section 9) with severity, location, and status.
 
 **Fix in severity order: Critical and High first.** A handful of confirmed Critical fixes beats a long list of unverified Lows.
 
@@ -88,7 +89,7 @@ Steps:
   - Next.js `NEXT_PUBLIC_*` · Vite `VITE_*` · Create React App `REACT_APP_*` · Expo `EXPO_PUBLIC_*` · Nuxt `runtimeConfig.public`
 - Audit those client-exposed prefixes — none should contain a secret.
 - Update `.env.example` with placeholder values only (e.g., `DATABASE_URL=your-database-url-here`).
-- Scan log statements for secret exposure — replace with `[REDACTED]` or a log scrubber (see Section 6).
+- Scan log statements for secret exposure — replace with `[REDACTED]` or a log scrubber (see Section 8).
 - Validate required env vars at startup so a missing one fails loud and early, not silently at request time.
 
 **Centralized helper pattern:**
@@ -211,7 +212,77 @@ The same shape applies in any stack: a dependency/decorator in FastAPI, middlewa
 
 ---
 
-## 5. Dependency Hygiene
+## 5. Data Exposure & Output Minimization
+
+**Goal:** responses, errors, and metadata expose only what the client actually needs — never internal fields, other users' data, secrets, or PII.
+
+This is the most common *quiet* leak: an endpoint that serializes a whole database row or ORM object, shipping password hashes, internal flags, or other users' fields without anyone noticing.
+
+Steps:
+- **Serialize with an allowlist, never a denylist.** Return explicitly named fields via a DTO/serializer; never `return user` / `JSON(row)`. New columns must not auto-leak.
+- **Strip sensitive fields**: password hashes, tokens, API keys, internal/admin flags, soft-delete markers, other users' identifiers.
+- **Scope queries to the caller.** List/search endpoints must filter to the caller's own data — never return all rows when they should see only theirs (ties to Section 4 / IDOR).
+- **Don't leak structure via errors.** No stack traces, framework banners, or raw DB error messages to clients — return generic messages (detail goes to logs, see Section 8).
+- **Keep PII out of URLs/query strings** (they land in access logs, analytics, and third-party referers) and out of third-party calls that don't need it.
+- **Set `Cache-Control: private/no-store`** on authenticated responses so shared caches/CDNs don't serve one user's data to another.
+- **Disable introspection/debug in prod**: GraphQL introspection off, no debug endpoints, no source maps that embed secrets.
+
+**Centralized helper pattern — explicit output serializer:**
+
+```typescript
+// TypeScript — allowlist the fields that leave the server
+export function toPublicUser(u: UserRow) {
+  return { id: u.id, name: u.name, avatarUrl: u.avatarUrl }
+  // u.passwordHash, u.isAdmin, u.email, ... simply never appear
+}
+```
+
+```python
+# Python (Pydantic) — response model declares what's allowed out;
+# anything not listed is dropped from the response automatically.
+class PublicUser(BaseModel):
+    id: int
+    name: str
+    avatar_url: str
+```
+
+---
+
+## 6. HTTP Security Headers & Configuration
+
+**Goal:** every HTTP response carries hardening headers, and cross-origin/cookie/transport config is locked down — applied in one central place, not per-route.
+
+Steps:
+- **Set baseline security headers on all responses:**
+  - `Content-Security-Policy` — restrict script/style/connect sources; avoid `unsafe-inline`. The single biggest XSS mitigation.
+  - `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload` — force HTTPS.
+  - `X-Content-Type-Options: nosniff`
+  - `X-Frame-Options: DENY` (or CSP `frame-ancestors 'none'`) — clickjacking.
+  - `Referrer-Policy: strict-origin-when-cross-origin`
+  - `Permissions-Policy` — disable unused browser features (camera, geolocation, etc.).
+- **CORS:** allowlist explicit origins; never reflect an arbitrary `Origin`, and never combine `*` with credentials.
+- **Cookies:** `HttpOnly`, `Secure`, `SameSite=Lax` (or `Strict`); scope `Path`/`Domain` tightly; keep sessions short-lived.
+- **Transport:** enforce HTTPS and redirect HTTP→HTTPS; disable TLS downgrade.
+- **CSRF:** protect state-changing requests with a token or `SameSite` cookies — pairs with the cookie settings above.
+
+**Centralized helper pattern — one place sets headers for every response:**
+
+```javascript
+// Next.js — next.config.js headers() (or middleware)
+const securityHeaders = [
+  { key: 'Content-Security-Policy', value: "default-src 'self'; object-src 'none'" },
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+]
+```
+
+Prefer a vetted helper over hand-rolling, and apply it **globally**: `helmet` (Express), `secure` (FastAPI/Starlette), `django-csp` + `SECURE_*` settings (Django), `secure_headers` (Rails), `secweb` (Go).
+
+---
+
+## 7. Dependency Hygiene
 
 **Goal:** No high-severity vulnerabilities; no unnecessary or risky dependencies.
 
@@ -243,7 +314,7 @@ Steps:
 
 ---
 
-## 6. Observability
+## 8. Observability
 
 **Goal:** Security-relevant events logged with context; secrets never appear in logs.
 
@@ -288,7 +359,7 @@ def log_auth_failure(route: str, reason: str, **meta):
 
 ---
 
-## 7. Verification
+## 9. Verification
 
 **Goal:** All automated checks pass; a clear, severity-ranked summary exists for human review.
 
