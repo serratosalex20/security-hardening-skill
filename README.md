@@ -165,6 +165,25 @@ Claude will:
 
 ---
 
+## Automation templates
+
+The skill drives a manual review pass. To make those checks run automatically on
+every commit and PR, this repo ships drop-in templates under [`templates/`](templates/):
+
+| Template | What it gives you |
+|----------|-------------------|
+| `templates/github-workflows/ci.yml` | PR gate — ruff (lint + format), mypy (types), pip-audit (dependency CVEs) |
+| `templates/github-workflows/security.yml` | PR + weekly gate — gitleaks (secrets), semgrep (SAST), trivy (deps + secrets + IaC) |
+| `templates/python/pyproject.toml` | Ruff + mypy config tuned for web projects (security `S` rules on) |
+| `templates/python/.pre-commit-config.yaml` | Local pre-commit enforcement (ruff, mypy, gitleaks, hygiene) |
+
+These are **not** auto-applied — copy what you need into your own projects. The
+recommended toolchain is deliberately non-overlapping (ruff, mypy, pip-audit,
+gitleaks, semgrep, trivy); see [`templates/README.md`](templates/README.md) for the
+full rationale and how each tool maps to a skill section.
+
+---
+
 ## Requirements
 
 - **Claude Code** (CLI, desktop app, or IDE extension) — or any agent that supports the skills format
