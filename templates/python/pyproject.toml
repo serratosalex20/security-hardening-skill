@@ -1,0 +1,63 @@
+# Ruff + mypy config for Python web projects.
+# Merge these blocks into your project's existing pyproject.toml.
+
+[tool.ruff]
+target-version = "py311"       # bump to "py312" or "py313" if newer
+line-length = 100
+extend-exclude = ["migrations", ".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # isort
+  "N",        # pep8-naming
+  "UP",       # pyupgrade
+  "B",        # flake8-bugbear (likely-bug patterns)
+  "SIM",      # flake8-simplify
+  "C90",      # mccabe complexity
+  "PERF",     # perflint
+  "S",        # flake8-bandit — security rules (replaces a separate scan)
+  "TCH",      # flake8-type-checking
+  "PTH",      # use pathlib over os.path
+  "ARG",      # unused arguments
+  "RUF",      # ruff-specific
+]
+ignore = [
+  "E501",     # line length — let the formatter handle it
+  "S101",     # `assert` — fine in tests; per-file-ignored below for src if desired
+  "B008",     # function call in default arg — FastAPI's Depends() needs this
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = ["S101", "S105", "S106", "ARG", "PLR2004"]  # asserts/hardcoded test creds OK in tests
+"**/migrations/*" = ["E", "F", "N"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.11"
+strict = false                 # flip to true once the codebase is clean
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = true   # gradual: turn off per-module if too noisy
+disallow_incomplete_defs = true
+ignore_missing_imports = true  # noisy third-party stubs
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false  # tests can stay loose
+
+# Add per-package opt-outs as you adopt mypy gradually:
+# [[tool.mypy.overrides]]
+# module = "myapp.legacy.*"
+# ignore_errors = true

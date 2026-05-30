@@ -1,0 +1,53 @@
+name: Security Scan
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: "0 6 * * 1"   # weekly Monday sweep catches newly-disclosed CVEs
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so gitleaks scans every commit
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE is only required for GitHub *orgs*; omit for personal/public repos
+
+  sast:
+    name: Static analysis (semgrep)
+    runs-on: ubuntu-latest
+    container: { image: semgrep/semgrep }
+    steps:
+      - uses: actions/checkout@v4
+      - run: >
+          semgrep scan
+          --config p/default
+          --config p/security-audit
+          --config p/owasp-top-ten
+          --config p/secrets
+          --error                 # non-zero exit fails the PR
+        # No SEMGREP_APP_TOKEN / account needed — these are the free public rulesets
+
+  vuln:
+    name: Dependency & IaC scan (trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig   # deps + secrets + IaC misconfig in one pass
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true              # only fail on CVEs that have a fix available
+          exit-code: "1"
