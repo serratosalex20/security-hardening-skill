@@ -1,30 +1,47 @@
 # security-hardening
 
-A Claude Code skill that runs an AI-assisted, threat-model-driven security review of your web app and applies a full hardening baseline before shipping to production. Works across stacks — TypeScript/JavaScript, Python, Go, Ruby, PHP, Java, and more.
+A Claude Code skill that runs an AI-assisted, threat-model-driven security review of your web app and applies a hardening baseline before shipping to production. Works across stacks: TypeScript/JavaScript, Next.js, Python, Go, Ruby, PHP, Java, Supabase/Firebase backends, and static sites on Vercel/Netlify.
 
-It scans broadly against an OWASP-aligned taxonomy, **triages findings by severity and true-positive likelihood**, then fixes the real issues (highest severity first) with centralized reusable helpers — and produces a final summary report with an auditable findings table.
+It scans broadly against an OWASP-aligned taxonomy, **triages findings by severity and true-positive likelihood**, then fixes the real issues (highest severity first) with centralized reusable helpers. It finishes with a summary report and an auditable findings table.
+
+It is built to run safely inside **any** repo or live site: it audits before it edits, records a build/test baseline, follows the target repo's own conventions, and never applies a change that could take a site down without asking first.
+
+---
+
+## Safe to run in any repo
+
+Security fixes are a classic way to break production. A strict CSP blocks your analytics and booking widget, `X-Frame-Options: DENY` breaks an embed, or HSTS `preload` locks a subdomain out for months. A new required env var fails the next deploy, or enabling RLS with no policies blocks every query. The skill has explicit guardrails against all of these (Section 0 of `SKILL.md`):
+
+| Guardrail | What it means |
+|---|---|
+| **Audit vs Fix mode** | "Review", "audit", "scan", and pre-deploy checks are read-only. Edits happen only when you ask to harden/fix, or approve fixes from an audit. |
+| **Baseline first** | Detects the stack and package manager, runs the project's *own* lint/typecheck/test/build before touching anything, and re-runs them after. Pre-existing failures are reported, not blamed on the fix. Any new failure is fixed or reverted. |
+| **Repo conventions win** | Follows the target repo's `CLAUDE.md`/`AGENTS.md`, reuses its existing auth guards, validators, and loggers, and doesn't add a new library when one already installed does the job. |
+| **Change-risk tiers** | **Tier 1**: behavior-preserving fixes (parameterized queries, log redaction, `nosniff`) are applied directly. **Tier 2**: applied after checking real callers (auth guards, validation schemas, serializers). **Tier 3**: proposed for your approval (CSP enforcement, HSTS, CORS, cookies, RLS, new env vars, major upgrades, new CI gates). |
+| **Public by design** | Lead forms, webhooks, and OAuth callbacks get validation, signatures, and abuse controls, not a login wall that would break the business. |
+| **Secret hygiene** | Never prints secret values, doesn't read real `.env` values, never rewrites git history, and always lists leaked keys for rotation. |
+| **Minimal, revertible diffs** | No repo-wide reformatting or drive-by refactors; one logical change per commit. |
 
 ---
 
 ## What it does
 
-When triggered, the skill walks through 9 sections in order:
+When triggered, the skill applies the ground rules, then walks through 9 sections:
 
 | Section | What it does |
 |---------|---------------|
-| **1. Threat model & AI-assisted scanning** | Maps entry points, assets, and attacker goals; scans the OWASP-aligned taxonomy (optionally fanning out parallel read-only subagents); triages every candidate by severity and confirms true positives before acting |
-| **2. Secrets** | Hardcoded API keys, tokens, passwords; client-bundled env vars (`NEXT_PUBLIC_*`, `VITE_*`, …); secrets in logs; startup env validation |
-| **3. Input handling** | Validation at every trust boundary; SQL/NoSQL/command injection; XSS; SSRF; open redirects |
-| **4. Authorization** | Every route/action checks auth + ownership server-side; IDOR / cross-tenant prevention; no frontend-only guards |
-| **5. Data exposure & output minimization** | Allowlist serializers so responses never leak password hashes, internal fields, or other users' data; no PII in URLs; generic error responses |
-| **6. HTTP security headers & config** | CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`; locked-down CORS, secure cookies, CSRF protection |
-| **7. Dependency hygiene** | `npm`/`pip`/`go`/`bundler`/`composer`/`cargo` audits + `osv-scanner`; unmaintained packages; HTTP/DB client config |
-| **8. Observability** | Structured logging for auth/authz/validation/webhook failures; no secrets in logs |
-| **9. Verification** | Lint, typecheck, tests, build, security scan; final written summary with findings table |
+| **0. Ground rules** | Picks Audit or Fix mode, records the build/test baseline, scopes to the target repo, and assigns every fix a risk tier |
+| **1. Threat model & AI-assisted scanning** | Maps entry points, assets, public-by-design endpoints, and attacker goals; scans the OWASP-aligned taxonomy (fanning out parallel read-only subagents on large repos); triages every candidate by severity and confirms true positives before acting |
+| **2. Secrets** | Hardcoded keys and tokens; client-bundled env vars (`NEXT_PUBLIC_*`, `VITE_*`, …), including which "public" keys are fine; rotation; build-safe env validation |
+| **3. Input handling** | Validation at every trust boundary without rejecting legitimate callers; SQL/NoSQL/command injection; XSS; SSRF; open redirects; webhook signatures; lead-form abuse; LLM prompt/output handling |
+| **4. Authorization** | Server-side auth + ownership checks; IDOR / cross-tenant prevention; Supabase RLS and Firebase rules rolled out without locking the app out |
+| **5. Data exposure & output minimization** | Allowlist serializers that keep every field consumers read; no PII in URLs; generic errors with stable status codes |
+| **6. HTTP security headers & config** | Staged rollout: `nosniff`/`Referrer-Policy` → frame protection → CSP in Report-Only → enforcement; careful HSTS, `Permissions-Policy`, CORS, cookies, CSRF |
+| **7. Dependency hygiene** | Audits with the project's own package manager (npm/pnpm/yarn/pip/go/bundler/composer/cargo + `osv-scanner`); least-disruptive upgrades; no `--force` |
+| **8. Observability** | Security-event logging via the project's existing logger; no secrets or PII in logs |
+| **9. Verification** | Re-runs the baseline, smoke-tests touched pages and flows, and writes the summary with findings, proposals, deploy-time actions, and before/after results |
 
 The core philosophy mirrors lessons from large-scale AI vulnerability discovery: **finding candidate issues is cheap; the bottleneck is triage, prioritization, and fixing.** So the skill confirms true positives, ranks by severity, and fixes the issues that matter first.
-
-At the end, Claude produces a **Security Hardening Summary** with a triaged findings table, every change made, every risk fixed, and any manual follow-up required (e.g. rotating a leaked key).
 
 ---
 
@@ -32,7 +49,7 @@ At the end, Claude produces a **Security Hardening Summary** with a triaged find
 
 ### Claude Code (recommended)
 
-**Option A — via `npx skills add` (installs across all supported agents)**
+**Option A: via `npx skills add` (installs across all supported agents)**
 
 ```bash
 npx skills add https://github.com/serratosalex20/security-hardening-skill --skill security-hardening
@@ -40,7 +57,9 @@ npx skills add https://github.com/serratosalex20/security-hardening-skill --skil
 
 This installs the skill for Claude Code, Cursor, Windsurf, Copilot, and 40+ other agents simultaneously.
 
-**Option B — manual install (Claude Code only)**
+**Option B: manual install (Claude Code only)**
+
+`SKILL.md` is self-contained, so the single file is all an agent needs.
 
 ```bash
 # Global install (available in all projects)
@@ -76,35 +95,32 @@ curl -o .windsurf/skills/security-hardening/SKILL.md \
 
 ## Verification
 
-After installing, confirm the skill is available:
+After installing, confirm the skill file is in place and Claude Code sees it:
 
 ```bash
-# Claude Code
-claude skills list | grep security-hardening
-
-# Or open a new Claude Code session and run:
-/skills
+# Global install
+ls ~/.claude/skills/security-hardening/SKILL.md
+# Project-scoped install
+ls .claude/skills/security-hardening/SKILL.md
 ```
 
-You should see `security-hardening` in the list.
+Then open a new Claude Code session and run `/skills`. You should see `security-hardening` in the list.
 
 ---
 
 ## Usage
 
-Once installed, trigger the skill by saying any of these naturally in conversation:
+Trigger the skill by saying any of these naturally in conversation:
 
 ```
-Apply a full security baseline to this repo.
-Do a security review before we ship.
-Harden this codebase.
-Scan this project for vulnerabilities.
-Threat model this app and fix what matters.
-Make this production-ready.
-Run a security audit.
+Do a security review before we ship.          → Audit mode (read-only report)
+Scan this project for vulnerabilities.        → Audit mode
+Threat model this app.                        → Audit mode
+Harden this codebase.                         → Fix mode
+Apply a full security baseline to this repo.  → Fix mode
+Make this production-ready.                   → Fix mode
+Check our security headers.                   → Only Section 6 (plus ground rules)
 ```
-
-Claude will automatically invoke the skill and work through all 9 sections.
 
 You can also invoke it explicitly:
 
@@ -112,55 +128,60 @@ You can also invoke it explicitly:
 /security-hardening
 ```
 
+To apply fixes after an audit, approve them in your reply ("apply the Tier 1 and Tier 2 fixes", "go ahead with the RLS migration").
+
 ---
 
 ## What to expect
 
 Claude will:
 
-1. **Threat model** your app — map entry points, assets, and attacker goals to prioritize the scan
-2. **Scan** the codebase across the OWASP-aligned taxonomy (fanning out parallel subagents for large repos)
-3. **Triage** every candidate — confirm true positives, assign severity, deduplicate; discard noise
-4. **Fix** real issues highest-severity-first, using centralized helpers (no copy-pasted guards)
-5. **Explain** every change and **flag** anything requiring manual action (e.g. rotate a leaked key)
-6. **Run** lint, typecheck, tests, and build to verify nothing is broken
-7. **Deliver** a written Security Hardening Summary with a triaged findings table
+1. **Set ground rules:** pick Audit or Fix mode, detect the stack and package manager, and record a baseline of the project's own checks.
+2. **Threat model** your app: map entry points, assets, public-by-design endpoints, and attacker goals to prioritize the scan.
+3. **Scan** the codebase across the OWASP-aligned taxonomy, fanning out parallel subagents on large repos.
+4. **Triage** every candidate: confirm true positives, assign severity and a risk tier, deduplicate, and discard noise.
+5. **Fix** (Fix mode only) real issues highest-severity-first within the risk tiers, using the project's own helpers and libraries.
+6. **Propose** anything risky (Tier 3) with what could break and how to roll it out, and **flag** deploy-time actions (env vars to set before merging, keys to rotate).
+7. **Verify** against the baseline (no new failures) and smoke-test the pages and flows it touched.
+8. **Deliver** a written Security Hardening Summary with a triaged findings table.
 
 ### Example summary output
 
 ```
 ## Security Hardening Summary
 
+**Mode:** Fix   **Scope:** whole repo   **Stack:** Next.js 16 on Vercel, Supabase
+
 ### Findings (triaged)
-| Severity | Location           | Issue                        | Status         |
-|----------|--------------------|------------------------------|----------------|
-| Critical | api/auth.ts:42     | Auth bypass via empty token  | Fixed          |
-| High     | api/users.ts:88    | IDOR — no ownership check     | Fixed          |
-| Medium   | web/profile.tsx:30 | Reflected XSS in name field   | Fixed          |
-| Low      | next.config.js     | Missing security headers      | Follow-up      |
-| —        | api/legacy.ts:12   | Suspected SQLi                | False positive |
+| Severity | Location           | Issue                           | Tier | Status          |
+|----------|--------------------|---------------------------------|------|-----------------|
+| Critical | supabase: leads    | RLS disabled; anon key can read  | 3    | Proposed        |
+| High     | api/users.ts:88    | IDOR — no ownership check        | 2    | Fixed           |
+| Medium   | web/profile.tsx:30 | Reflected XSS in name field      | 1    | Fixed           |
+| Low      | next.config.js     | No CSP                           | 3    | Report-Only shipped; enforce pending |
+| —        | api/legacy.ts:12   | Suspected SQLi                   | —    | False positive  |
 
 ### Changes Made
-- lib/env.server.ts: Created server-only env validation
-- app/api/users/route.ts: Added requireAuth() + input schema validation
-- lib/logger.ts: Added structured logger with secret redaction
+- app/api/users/[id]/route.ts: added requireOwnership() — no other caller reads other users' records
+- lib/logger.ts: added redaction for authorization headers and tokens
 
-### Risks Fixed
-- Secrets: Moved 3 hardcoded API keys to server-only env vars
-- Input handling: Added schema validation to 5 API routes
-- Authorization: Added requireAuth() to 4 unguarded routes
-- Observability: Replaced console.log(token) with redacted logger
+### Proposed — needs your approval (Tier 3)
+- Enable RLS on `leads` with an insert-only policy for anon and read for the owner (migration drafted, not applied)
 
-### Manual Follow-up Required
-- [ ] Rotate STRIPE_SECRET_KEY — was previously hardcoded in api/stripe.ts
-- [ ] Set DATABASE_URL on production hosting platform
+### Deploy-time actions (do these BEFORE merging)
+- [ ] Set STRIPE_WEBHOOK_SECRET in Vercel Production + Preview
 
-### Verification Results
-- Lint:       PASS
-- Typecheck:  PASS
-- Tests:      PASS (47/47)
-- Build:      PASS
-- Audit:      0 high, 1 moderate issue remaining
+### Manual Follow-up
+- [ ] Rotate the Stripe secret key previously committed in api/stripe.ts
+
+### Verification (baseline → after)
+| Check     | Before       | After        |
+|-----------|--------------|--------------|
+| Lint      | PASS         | PASS         |
+| Typecheck | PASS         | PASS         |
+| Tests     | PASS (47/47) | PASS (49/49) |
+| Build     | PASS         | PASS         |
+| Audit     | 2 high       | 0 high       |
 ```
 
 ---
@@ -172,22 +193,23 @@ every commit and PR, this repo ships drop-in templates under [`templates/`](temp
 
 | Template | What it gives you |
 |----------|-------------------|
-| `templates/github-workflows/ci.yml` | PR gate — ruff (lint + format), mypy (types), pip-audit (dependency CVEs) |
-| `templates/github-workflows/security.yml` | PR + weekly gate — gitleaks (secrets), semgrep (SAST), trivy (deps + secrets + IaC) |
+| `templates/github-workflows/security.yml` | Any stack. PR + weekly gate: gitleaks (secrets), semgrep (SAST, PRs fail only on new findings), trivy (deps + secrets + IaC) |
+| `templates/github-workflows/ci.yml` | Python. PR gate: ruff (lint + format), mypy (types), pip-audit (dependency CVEs) |
+| `templates/github-workflows/ci-node.yml` | JS/TS. PR gate: installs with your lockfile's package manager and runs only the lint/typecheck/test/build scripts you have |
 | `templates/python/pyproject.toml` | Ruff + mypy config tuned for web projects (security `S` rules on) |
 | `templates/python/.pre-commit-config.yaml` | Local pre-commit enforcement (ruff, mypy, gitleaks, hygiene) |
 
-These are **not** auto-applied — copy what you need into your own projects. The
-recommended toolchain is deliberately non-overlapping (ruff, mypy, pip-audit,
-gitleaks, semgrep, trivy); see [`templates/README.md`](templates/README.md) for the
-full rationale and how each tool maps to a skill section.
+These are **not** auto-applied. Copy what you need into your own projects, and read
+["Adopting on an existing repo"](templates/README.md#adopting-on-an-existing-repo-read-this-first)
+first so strict checks don't block unrelated work. Every action is pinned to a commit SHA;
+see [`templates/README.md`](templates/README.md) for the rationale and how each tool maps to a skill section.
 
 ---
 
 ## Requirements
 
-- **Claude Code** (CLI, desktop app, or IDE extension) — or any agent that supports the skills format
-- The skill itself has no runtime dependencies — it instructs Claude to use whatever tools/libraries are already in your project (Zod, pino, bcrypt, etc.)
+- **Claude Code** (CLI, desktop app, or IDE extension), or any agent that supports the skills format
+- The skill itself has no runtime dependencies. It instructs Claude to use whatever tools and libraries are already in your project.
 - For the `npx skills add` install method: Node.js 18+
 
 ---
@@ -202,6 +224,9 @@ npx skills add https://github.com/serratosalex20/security-hardening-skill --skil
 curl -o ~/.claude/skills/security-hardening/SKILL.md \
   https://raw.githubusercontent.com/serratosalex20/security-hardening-skill/master/SKILL.md
 ```
+
+If you've copied `SKILL.md` into other repos or skill bundles, re-copy it there too.
+Copies don't update themselves. See [`CHANGELOG.md`](CHANGELOG.md) for what changed.
 
 ---
 
