@@ -1,5 +1,14 @@
 # Ruff + mypy config for Python web projects.
-# Merge these blocks into your project's existing pyproject.toml.
+# Merge these [tool.*] blocks into your project's existing pyproject.toml; don't replace it.
+# These are tool settings only. Don't add a [project] table just for them
+# (ci.yml installs the project as a package only when [project] exists).
+#
+# New project: use as-is.
+# Existing codebase: this rule set will report a lot on day one. Adopt gradually:
+#   1. `ruff check . --statistics` to see what fires.
+#   2. Start with `select = ["E4", "E7", "E9", "F", "B", "S"]` (bugs + security), get it green,
+#      then add the remaining families one PR at a time.
+#   3. Keep `disallow_untyped_defs = false` in mypy until the code is annotated.
 
 [tool.ruff]
 target-version = "py311"       # bump to "py312" or "py313" if newer
@@ -18,7 +27,7 @@ select = [
   "C90",      # mccabe complexity
   "PERF",     # perflint
   "S",        # flake8-bandit — security rules (replaces a separate scan)
-  "TCH",      # flake8-type-checking
+  "TC",       # flake8-type-checking
   "PTH",      # use pathlib over os.path
   "ARG",      # unused arguments
   "RUF",      # ruff-specific
@@ -30,7 +39,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["S101", "S105", "S106", "ARG", "PLR2004"]  # asserts/hardcoded test creds OK in tests
+"tests/**/*" = ["S101", "S105", "S106", "ARG"]  # asserts/hardcoded test creds OK in tests
 "**/migrations/*" = ["E", "F", "N"]
 
 [tool.ruff.lint.mccabe]
@@ -49,7 +58,7 @@ warn_redundant_casts = true
 warn_return_any = true
 no_implicit_optional = true
 check_untyped_defs = true
-disallow_untyped_defs = true   # gradual: turn off per-module if too noisy
+disallow_untyped_defs = true   # existing codebase: start false (see header), or opt out per module
 disallow_incomplete_defs = true
 ignore_missing_imports = true  # noisy third-party stubs
 

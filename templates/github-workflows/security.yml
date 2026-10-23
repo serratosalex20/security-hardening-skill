@@ -1,3 +1,12 @@
+# Security gate: gitleaks (secrets), semgrep (SAST), trivy (deps + secrets + IaC misconfig).
+# Language-agnostic. Copy to .github/workflows/security.yml.
+#
+# Existing repo: pull requests fail only on what they introduce (semgrep compares against
+# the PR base; gitleaks scans the PR's commits). Push and weekly runs scan everything, so
+# they stay red until existing findings are fixed or triaged. See templates/README.md.
+#
+# Actions and the semgrep image are pinned to immutable SHAs/digests because tags can be
+# moved (the trivy-action compromise of March 2026). Bump with Dependabot or pinact.
 name: Security Scan
 
 on:
@@ -14,36 +23,57 @@ jobs:
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # gitleaks-action lists the PR's commits
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0          # full history so gitleaks scans every commit
-      - uses: gitleaks/gitleaks-action@v2
+          fetch-depth: 0          # full history so gitleaks can scan every commit
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITLEAKS_LICENSE is only required for GitHub *orgs*; omit for personal/public repos
+          GITLEAKS_ENABLE_COMMENTS: "false"   # findings fail the job; commenting would need write access
+          # Repos owned by a GitHub *organization* also need a license key (free at gitleaks.io):
+          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
   sast:
     name: Static analysis (semgrep)
     runs-on: ubuntu-latest
-    container: { image: semgrep/semgrep }
+    container:
+      image: semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3
     steps:
-      - uses: actions/checkout@v4
-      - run: >
-          semgrep scan
-          --config p/default
-          --config p/security-audit
-          --config p/owasp-top-ten
-          --config p/secrets
-          --error                 # non-zero exit fails the PR
-        # No SEMGREP_APP_TOKEN / account needed — these are the free public rulesets
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0          # the PR base commit must be present for --baseline-commit
+          persist-credentials: false
+      - name: semgrep scan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # Pull requests: report only findings the PR introduces. Push/schedule: full scan.
+          set --
+          if [ -n "$BASE_SHA" ]; then set -- --baseline-commit "$BASE_SHA"; fi
+          # Free public rulesets; no SEMGREP_APP_TOKEN or account needed.
+          # Secrets are covered by gitleaks + trivy, so p/secrets is left out to avoid duplicates.
+          semgrep scan \
+            --config p/default \
+            --config p/security-audit \
+            --config p/owasp-top-ten \
+            --metrics off \
+            --error \
+            "$@"
 
   vuln:
     name: Dependency & IaC scan (trivy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
