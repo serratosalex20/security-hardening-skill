@@ -32,6 +32,7 @@ For a request that covers one area ("check our headers", "is this endpoint safe?
 
 - **Audit mode (read-only).** Edit no files. Use it when the user says review, audit, scan, check, threat model, or "is this safe", and whenever the skill fires as a **pre-deploy check**. Don't start rewriting code in the middle of someone's deploy. Deliver the summary with the fixes you recommend, then ask which to apply.
 - **Fix mode.** Use it when the user says harden, secure, fix, apply the baseline, or make production-ready, or approves fixes from an audit. Apply Tier 1 and Tier 2 changes (Section 0d). List Tier 3 changes as proposals.
+- **An explicit fix request beats the pre-deploy default.** A workflow's dedicated hardening phase that says "apply the baseline" before the first deploy runs in Fix mode. A deploy that merely triggers the skill runs in Audit mode.
 - **Unclear?** Run an audit, then offer the fixes. Asking costs one message; guessing wrong can cost a broken site.
 
 This skill never deploys, merges, rotates keys, or changes hosting, DNS, or dashboard settings itself. Those go in **Manual follow-up**.
@@ -385,8 +386,8 @@ class PublicUser(BaseModel):
 
 | Header | Tier | Safe starting value and notes |
 |---|---|---|
-| `X-Content-Type-Options` | 1 | `nosniff` |
-| `Referrer-Policy` | 1 | `strict-origin-when-cross-origin` (already the browser default) |
+| `X-Content-Type-Options` | 1 | `nosniff`. First confirm the host serves scripts and styles with correct types (`curl -sI` on a `.js`/`.css`/`.mjs`/`.wasm` URL). Some S3/nginx setups send `application/octet-stream`, and `nosniff` then blocks those files. |
+| `Referrer-Policy` | 1 | `strict-origin-when-cross-origin` (already the browser default). If the site already sets a different value on purpose (for example for partner or affiliate attribution), leave it. |
 | `X-Frame-Options` / CSP `frame-ancestors` | 2 | `DENY` / `'none'`, but only if nothing embeds the site: widgets, booking or chat embeds served from it, client portals, site-builder previews. Use `SAMEORIGIN` or an allowlist otherwise. |
 | `Content-Security-Policy` | 3 | Ship as `Content-Security-Policy-Report-Only` first. See the CSP rollout below. |
 | `Strict-Transport-Security` | 3 | Many hosts already send it, so check first. If adding: `max-age=86400`, then raise to `31536000` once verified. `includeSubDomains` only when *every* subdomain serves valid HTTPS (mail, legacy, CNAMEs to third-party tools). `preload` only with the owner's sign-off, because removal from browser preload lists takes months. |
@@ -419,7 +420,8 @@ class PublicUser(BaseModel):
 
 ```javascript
 // next.config.js — extend an existing headers() instead of adding a second one
-// (next.config.mjs / next.config.ts: same shape with `export default`)
+// (next.config.mjs / next.config.ts: same shape with `export default`).
+// With output: 'export' (static export) headers() is ignored; set headers in the host config instead.
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },                         // Tier 1
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },        // Tier 1
