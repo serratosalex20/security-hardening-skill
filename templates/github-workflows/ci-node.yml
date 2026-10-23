@@ -1,0 +1,67 @@
+# JS/TS CI gate: installs with the repo's own package manager (picked from the lockfile),
+# then runs lint, typecheck, test, and build, each only if package.json defines it.
+# Dependency CVEs are covered by trivy in security.yml.
+# Copy to .github/workflows/ci.yml (or keep the name ci-node.yml).
+#
+# Actions are pinned to full commit SHAs because tags can be moved (the trivy-action
+# compromise of March 2026). Bump with Dependabot (github-actions ecosystem) or pinact.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Match your project (.nvmrc / "engines"). pnpm/yarn below rely on corepack,
+          # which ships with Node 24 and earlier but not Node 25+.
+          node-version: 24
+      - name: Install dependencies (lockfile decides the package manager)
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+            echo "PM=pnpm" >> "$GITHUB_ENV"
+          elif [ -f yarn.lock ]; then
+            corepack enable
+            if [ -f .yarnrc.yml ]; then yarn install --immutable; else yarn install --frozen-lockfile; fi
+            echo "PM=yarn" >> "$GITHUB_ENV"
+          elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+            echo "PM=npm" >> "$GITHUB_ENV"
+          elif [ -f bun.lock ] || [ -f bun.lockb ]; then
+            echo "::error::Bun project: replace this step with oven-sh/setup-bun and 'bun install --frozen-lockfile'."
+            exit 1
+          else
+            echo "::error::No lockfile found. Commit one so CI installs exactly what you tested."
+            exit 1
+          fi
+      - name: Run project scripts that exist
+        # If `build` needs env vars, add them as repository secrets/variables in an `env:` block
+        # here, or have the code validate them lazily at runtime (SKILL.md Section 2).
+        run: |
+          for script in lint typecheck type-check test build; do
+            if node -e 'const s = (require("./package.json").scripts || {})[process.argv[1]]; process.exit(s && !/no test specified/.test(s) ? 0 : 1)' "$script"; then
+              echo "::group::$PM run $script"
+              "$PM" run "$script"
+              echo "::endgroup::"
+            else
+              echo "Skipping '$script' (not in package.json, or npm's placeholder test script)"
+            fi
+          done
